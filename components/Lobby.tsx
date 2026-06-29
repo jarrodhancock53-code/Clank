@@ -11,16 +11,20 @@ export function Lobby({
   myPlayerId,
   busy,
   onStart,
+  onAddLocalPlayer,
 }: {
   game: GameRow;
   players: PlayerRow[];
   myPlayerId: string;
   busy: boolean;
   onStart: () => void;
+  onAddLocalPlayer: (name: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const [localName, setLocalName] = useState("");
   const isHost = game.host_player_id === myPlayerId;
   const canStart = players.length >= 2 && players.length <= 6;
+  const canAddMore = players.length < 6;
 
   function copyLink() {
     const url = `${window.location.origin}/game/${game.join_code}`;
@@ -63,6 +67,39 @@ export function Lobby({
           ))}
         </div>
       </div>
+
+      {canAddMore && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            const trimmed = localName.trim();
+            if (!trimmed) return;
+            onAddLocalPlayer(trimmed);
+            setLocalName("");
+          }}
+          className="flex w-full max-w-sm flex-col gap-2"
+        >
+          <p className="text-center text-xs text-parchment-300/60">
+            Passing the device around in person? Add the other players right here instead of sharing a link.
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={localName}
+              onChange={(e) => setLocalName(e.target.value)}
+              maxLength={24}
+              placeholder="Another player's name"
+              className="flex-1 rounded border border-dungeon-700 bg-dungeon-950 px-3 py-2 text-sm text-parchment-100 outline-none focus:border-gold-500"
+            />
+            <button
+              type="submit"
+              disabled={!localName.trim() || busy}
+              className="rounded border border-gold-600 px-3 py-2 text-sm text-gold-300 hover:bg-gold-700/20 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Add to this device
+            </button>
+          </div>
+        </form>
+      )}
 
       {isHost ? (
         <button

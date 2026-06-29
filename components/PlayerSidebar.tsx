@@ -27,15 +27,26 @@ export interface PlayerSidebarProps {
   turnLog: TurnLogRow[];
   myPlayerId: string;
   dragonBagCount: number;
+  onSwitchPlayer?: () => void;
 }
 
-export function PlayerSidebar({ game, players, turnLog, myPlayerId, dragonBagCount }: PlayerSidebarProps) {
+export function PlayerSidebar({ game, players, turnLog, myPlayerId, dragonBagCount, onSwitchPlayer }: PlayerSidebarProps) {
   const currentPlayerId = game.player_order[game.current_player_index];
 
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 text-parchment-200">
       <div>
-        <h2 className="mb-1 font-display text-lg font-bold text-gold-400">Adventurers</h2>
+        <div className="mb-1 flex items-center justify-between">
+          <h2 className="font-display text-lg font-bold text-gold-400">Adventurers</h2>
+          {onSwitchPlayer && (
+            <button
+              onClick={onSwitchPlayer}
+              className="rounded border border-dungeon-700 px-2 py-0.5 text-[10px] text-parchment-300/80 hover:border-gold-500 hover:text-gold-300"
+            >
+              Pass Device
+            </button>
+          )}
+        </div>
         <div className="space-y-1.5">
           {players.map((p) => {
             const clank = game.game_state.clankArea[p.id] || 0;

@@ -1,9 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import toast from "react-hot-toast";
 import { api, fetchGameByCode } from "@/lib/api/client";
-import { getOrCreatePlayerId, getStoredPlayerName, setStoredPlayerName } from "@/lib/identity";
+import {
+  addLocalSeat,
+  getActiveSeat,
+  getLocalSeats,
+  getOrCreatePlayerId,
+  getStoredPlayerName,
+  setActiveSeat,
+  setStoredPlayerName,
+} from "@/lib/identity";
 import { useGameRealtime } from "@/hooks/useGameRealtime";
 import { ROOM_BY_ID, getTunnel } from "@/lib/game/board";
 import { getCardDef } from "@/lib/game/cards";
@@ -17,6 +25,7 @@ import { ReactPrompt } from "@/components/ReactPrompt";
 import { PendingDiscardPrompt } from "@/components/PendingDiscardPrompt";
 import { FinalScoreboard } from "@/components/FinalScoreboard";
 import { NameEntryForm } from "@/components/NameEntryForm";
+import { SeatSwitcher } from "@/components/SeatSwitcher";
 
 interface GameSnapshot {
   game: GameRow;
@@ -28,7 +37,13 @@ interface GameSnapshot {
 
 export default function GamePage({ params }: { params: { code: string } }) {
   const code = params.code.toUpperCase();
-  const [myPlayerId, setMyPlayerId] = useState("");
+  // The identity this device created for itself (used to join as a regular
+  // player). `viewerId` below is whichever seat this device is currently
+  // *acting as*, which may differ from `deviceId` when pass-and-play has
+  // added extra local seats to the same device.
+  const [deviceId, setDeviceId] = useState("");
+  const [activeSeatId, setActiveSeatId] = useState<string | null>(null);
+  const [seatSwitcherOpen, setSeatSwitcherOpen] = useState(false);
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -37,7 +52,7 @@ export default function GamePage({ params }: { params: { code: string } }) {
   const [pendingChoice, setPendingChoice] = useState<ChoiceRequest | null>(null);
 
   useEffect(() => {
-    setMyPlayerId(getOrCreatePlayerId());
+    setDeviceId(getOrCreatePlayerId());
   }, []);
 
   const refetch = useCallback(async () => {
@@ -58,11 +73,40 @@ export default function GamePage({ params }: { params: { code: string } }) {
 
   useGameRealtime(snapshot?.game.id, refetch);
 
+  // Seats this device controls (its own identity plus any local seats added
+  // for pass-and-play) that are actually players in this game.
+  const mySeats = useMemo(() => {
+    if (!snapshot || !deviceId) return [];
+    const ids = new Set([deviceId, ...getLocalSeats().map((s) => s.id)]);
+    return snapshot.players.filter((p) => ids.has(p.id));
+  }, [snapshot, deviceId]);
+
+  useEffect(() => {
+    if (!snapshot || mySeats.length === 0) return;
+    const stored = getActiveSeat(snapshot.game.id);
+    if (stored && mySeats.some((p) => p.id === stored)) {
+      setActiveSeatId(stored);
+    } else if (mySeats.length === 1) {
+      setActiveSeat(snapshot.game.id, mySeats[0].id);
+      setActiveSeatId(mySeats[0].id);
+    } else {
+      setActiveSeatId(null); // multiple seats, none chosen yet — prompt below
+    }
+  }, [snapshot?.game.id, mySeats]);
+
+  const viewerId = activeSeatId || deviceId;
+
+  function chooseSeat(playerId: string) {
+    if (snapshot) setActiveSeat(snapshot.game.id, playerId);
+    setActiveSeatId(playerId);
+    setSeatSwitcherOpen(false);
+  }
+
   async function handleJoin(name: string) {
     setJoining(true);
     try {
       setStoredPlayerName(name);
-      await api.joinGame(code, name, myPlayerId);
+      await api.joinGame(code, name, deviceId);
       await refetch();
     } catch (e: any) {
       toast.error(e.message || "Failed to join game.");
@@ -71,11 +115,25 @@ export default function GamePage({ params }: { params: { code: string } }) {
     }
   }
 
+  async function handleAddLocalPlayer(name: string) {
+    setBusy(true);
+    try {
+      const seat = addLocalSeat(name);
+      setStoredPlayerName(name);
+      await api.joinGame(code, name, seat.id);
+      await refetch();
+    } catch (e: any) {
+      toast.error(e.message || "Failed to add player.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleStart() {
     if (!snapshot) return;
     setBusy(true);
     try {
-      await api.startGame(snapshot.game.id, myPlayerId);
+      await api.startGame(snapshot.game.id, viewerId);
       await refetch();
     } catch (e: any) {
       toast.error(e.message || "Failed to start game.");
@@ -98,23 +156,23 @@ export default function GamePage({ params }: { params: { code: string } }) {
 
   function doPlayCard(cardInstanceId: string, choices?: Record<string, any>) {
     if (!snapshot) return;
-    return run(() => api.playCard(snapshot.game.id, myPlayerId, cardInstanceId, choices));
+    return run(() => api.playCard(snapshot.game.id, viewerId, cardInstanceId, choices));
   }
 
   function doMove(toRoomId: string, opts?: { paySwordsForMonster?: boolean; useTeleportCharge?: boolean }) {
     if (!snapshot) return;
-    return run(() => api.move(snapshot.game.id, myPlayerId, toRoomId, opts));
+    return run(() => api.move(snapshot.game.id, viewerId, toRoomId, opts));
   }
 
   function doUseDevice(slot: number, choices?: Record<string, any>) {
     if (!snapshot) return;
-    return run(() => api.useDevice(snapshot.game.id, myPlayerId, slot, choices));
+    return run(() => api.useDevice(snapshot.game.id, viewerId, slot, choices));
   }
 
   function handlePlayCard(cardInstanceId: string) {
     if (!snapshot) return;
     const def = getCardDef(cardInstanceId);
-    const me = snapshot.players.find((p) => p.id === myPlayerId);
+    const me = snapshot.players.find((p) => p.id === viewerId);
     if (!me) return;
 
     if (def.effects.includes("discard_1_to_draw_2")) {
@@ -130,7 +188,7 @@ export default function GamePage({ params }: { params: { code: string } }) {
 
   function handleRoomClick(roomId: string) {
     if (!snapshot) return;
-    const me = snapshot.players.find((p) => p.id === myPlayerId);
+    const me = snapshot.players.find((p) => p.id === viewerId);
     if (!me) return;
     const tunnel = getTunnel(me.position, roomId);
     if (!tunnel) return;
@@ -220,7 +278,7 @@ export default function GamePage({ params }: { params: { code: string } }) {
   }
 
   const { game, players, dungeonRow, dragonBagCubes, turnLog } = snapshot;
-  const me = players.find((p) => p.id === myPlayerId);
+  const me = players.find((p) => p.id === viewerId);
 
   if (!me) {
     if (game.status !== "lobby") {
@@ -248,30 +306,46 @@ export default function GamePage({ params }: { params: { code: string } }) {
   }
 
   if (game.status === "lobby") {
-    return <Lobby game={game} players={players} myPlayerId={myPlayerId} busy={busy} onStart={handleStart} />;
+    return (
+      <Lobby
+        game={game}
+        players={players}
+        myPlayerId={viewerId}
+        busy={busy}
+        onStart={handleStart}
+        onAddLocalPlayer={handleAddLocalPlayer}
+      />
+    );
   }
 
   if (game.status === "finished") {
-    return <FinalScoreboard game={game} players={players} myPlayerId={myPlayerId} />;
+    return <FinalScoreboard game={game} players={players} myPlayerId={viewerId} />;
   }
 
-  const isMyTurn = game.player_order[game.current_player_index] === myPlayerId;
-  const isHost = game.host_player_id === myPlayerId;
-  const myReactOpportunity = game.game_state.turnFlags.reactOpportunities.find((o) => o.playerId === myPlayerId);
-  const myPendingDiscard = game.game_state.turnFlags.pendingDiscard?.playerId === myPlayerId;
+  const isMyTurn = game.player_order[game.current_player_index] === viewerId;
+  const isHost = game.host_player_id === viewerId;
+  const myReactOpportunity = game.game_state.turnFlags.reactOpportunities.find((o) => o.playerId === viewerId);
+  const myPendingDiscard = game.game_state.turnFlags.pendingDiscard?.playerId === viewerId;
 
   return (
     <main className="flex h-screen flex-col bg-dungeon-texture lg:flex-row">
       <div className="order-2 h-72 shrink-0 border-t border-dungeon-700 lg:order-1 lg:h-full lg:w-72 lg:border-r lg:border-t-0">
-        <PlayerSidebar game={game} players={players} turnLog={turnLog} myPlayerId={myPlayerId} dragonBagCount={dragonBagCubes.length} />
+        <PlayerSidebar
+          game={game}
+          players={players}
+          turnLog={turnLog}
+          myPlayerId={viewerId}
+          dragonBagCount={dragonBagCubes.length}
+          onSwitchPlayer={mySeats.length > 1 ? () => setSeatSwitcherOpen(true) : undefined}
+        />
       </div>
 
       <div className="order-1 flex-1 lg:order-2">
         <Board
           rooms={game.game_state.rooms}
           players={players}
-          myPlayerId={myPlayerId}
-          movablePlayerId={isMyTurn ? myPlayerId : null}
+          myPlayerId={viewerId}
+          movablePlayerId={isMyTurn ? viewerId : null}
           onRoomClick={isMyTurn && !busy ? handleRoomClick : undefined}
         />
       </div>
@@ -285,15 +359,15 @@ export default function GamePage({ params }: { params: { code: string } }) {
           isHost={isHost}
           busy={busy}
           onPlayCard={handlePlayCard}
-          onBuyRow={(slot) => run(() => api.buyCardFromRow(game.id, myPlayerId, slot))}
-          onBuyReserve={(cardId) => run(() => api.buyCardFromReserve(game.id, myPlayerId, cardId))}
-          onFightRow={(slot) => run(() => api.fightMonsterInRow(game.id, myPlayerId, slot))}
-          onFightReserveGoblin={() => run(() => api.fightReserveGoblin(game.id, myPlayerId))}
+          onBuyRow={(slot) => run(() => api.buyCardFromRow(game.id, viewerId, slot))}
+          onBuyReserve={(cardId) => run(() => api.buyCardFromReserve(game.id, viewerId, cardId))}
+          onFightRow={(slot) => run(() => api.fightMonsterInRow(game.id, viewerId, slot))}
+          onFightReserveGoblin={() => run(() => api.fightReserveGoblin(game.id, viewerId))}
           onUseDevice={handleUseDevice}
-          onBuyMarketItem={(item) => run(() => api.buyMarketItem(game.id, myPlayerId, item))}
-          onEndTurn={() => run(() => api.endTurn(game.id, myPlayerId))}
-          onSkipTurn={() => run(() => api.skipTurn(game.id, myPlayerId))}
-          onManualDragonAttack={() => run(() => api.manualDragonAttack(game.id, myPlayerId))}
+          onBuyMarketItem={(item) => run(() => api.buyMarketItem(game.id, viewerId, item))}
+          onEndTurn={() => run(() => api.endTurn(game.id, viewerId))}
+          onSkipTurn={() => run(() => api.skipTurn(game.id, viewerId))}
+          onManualDragonAttack={() => run(() => api.manualDragonAttack(game.id, viewerId))}
         />
       </div>
 
@@ -305,9 +379,9 @@ export default function GamePage({ params }: { params: { code: string } }) {
           hand={me.hand}
           busy={busy}
           onPlay={(cardInstanceId) =>
-            run(() => api.reactPlay(game.id, myPlayerId, myReactOpportunity.id, cardInstanceId))
+            run(() => api.reactPlay(game.id, viewerId, myReactOpportunity.id, cardInstanceId))
           }
-          onDecline={() => run(() => api.reactDecline(game.id, myPlayerId, myReactOpportunity.id))}
+          onDecline={() => run(() => api.reactDecline(game.id, viewerId, myReactOpportunity.id))}
         />
       )}
 
@@ -315,7 +389,15 @@ export default function GamePage({ params }: { params: { code: string } }) {
         <PendingDiscardPrompt
           hand={me.hand}
           busy={busy}
-          onDiscard={(cardInstanceId) => run(() => api.resolvePendingDiscard(game.id, myPlayerId, cardInstanceId))}
+          onDiscard={(cardInstanceId) => run(() => api.resolvePendingDiscard(game.id, viewerId, cardInstanceId))}
+        />
+      )}
+
+      {(seatSwitcherOpen || (mySeats.length > 1 && !activeSeatId)) && (
+        <SeatSwitcher
+          seats={mySeats.map((p) => ({ id: p.id, name: p.display_name, color: p.color }))}
+          onChoose={chooseSeat}
+          onClose={activeSeatId ? () => setSeatSwitcherOpen(false) : undefined}
         />
       )}
     </main>
