@@ -67,13 +67,19 @@ export function resolveEffect(effectId: string, cardInstanceId: string, ctx: Eff
     }
     case "draw_2_discard_1": {
       drawCards(player, 2, log);
-      const discardTarget = ctx.choices?.discardCardId || player.hand[player.hand.length - 1];
-      const idx = player.hand.indexOf(discardTarget);
-      if (idx >= 0) {
+      const discardTarget = ctx.choices?.discardCardId;
+      if (discardTarget && player.hand.includes(discardTarget)) {
+        const idx = player.hand.indexOf(discardTarget);
         player.hand.splice(idx, 1);
         player.discard.push(discardTarget);
+        log.push(`${player.display_name} drew 2 cards and discarded 1.`);
+      } else {
+        // The drawn cards aren't known to the client until now, so the
+        // discard choice can't be made up front — flag it as pending and
+        // require the player to resolve it before taking any other action.
+        gameState.turnFlags.pendingDiscard = { playerId: player.id };
+        log.push(`${player.display_name} drew 2 cards and must choose 1 to discard.`);
       }
-      log.push(`${player.display_name} drew 2 cards and discarded 1.`);
       return;
     }
     case "discard_1_to_draw_2": {

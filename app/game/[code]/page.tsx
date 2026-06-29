@@ -14,6 +14,7 @@ import { PlayerSidebar } from "@/components/PlayerSidebar";
 import { ActionPanel } from "@/components/ActionPanel";
 import { ChoiceModal, ChoiceRequest } from "@/components/ChoiceModal";
 import { ReactPrompt } from "@/components/ReactPrompt";
+import { PendingDiscardPrompt } from "@/components/PendingDiscardPrompt";
 import { FinalScoreboard } from "@/components/FinalScoreboard";
 import { NameEntryForm } from "@/components/NameEntryForm";
 
@@ -257,6 +258,7 @@ export default function GamePage({ params }: { params: { code: string } }) {
   const isMyTurn = game.player_order[game.current_player_index] === myPlayerId;
   const isHost = game.host_player_id === myPlayerId;
   const myReactOpportunity = game.game_state.turnFlags.reactOpportunities.find((o) => o.playerId === myPlayerId);
+  const myPendingDiscard = game.game_state.turnFlags.pendingDiscard?.playerId === myPlayerId;
 
   return (
     <main className="flex h-screen flex-col bg-dungeon-texture lg:flex-row">
@@ -306,6 +308,14 @@ export default function GamePage({ params }: { params: { code: string } }) {
             run(() => api.reactPlay(game.id, myPlayerId, myReactOpportunity.id, cardInstanceId))
           }
           onDecline={() => run(() => api.reactDecline(game.id, myPlayerId, myReactOpportunity.id))}
+        />
+      )}
+
+      {myPendingDiscard && (
+        <PendingDiscardPrompt
+          hand={me.hand}
+          busy={busy}
+          onDiscard={(cardInstanceId) => run(() => api.resolvePendingDiscard(game.id, myPlayerId, cardInstanceId))}
         />
       )}
     </main>

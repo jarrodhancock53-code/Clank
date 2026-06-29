@@ -45,4 +45,6 @@ export const api = {
     post("react-play", { gameId, playerId, opportunityId, cardInstanceId }),
   reactDecline: (gameId: string, playerId: string, opportunityId: string) =>
     post("react-decline", { gameId, playerId, opportunityId }),
+  resolvePendingDiscard: (gameId: string, playerId: string, discardCardId: string) =>
+    post("resolve-pending-discard", { gameId, playerId, discardCardId }),
 };

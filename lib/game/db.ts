@@ -23,6 +23,10 @@ export async function loadEngineContextByGameId(gameId: string): Promise<EngineC
 
   if (gameRes.error || !gameRes.data) throw new GameActionError("Game not found.");
   if (playersRes.error) throw new GameActionError("Failed to load players.");
+  if (rowRes.error) throw new GameActionError("Failed to load the dungeon row.");
+  // bagRes uses .single() and legitimately has no row until the game starts
+  // (PGRST116 = no rows found); any other error means a real query failure.
+  if (bagRes.error && bagRes.error.code !== "PGRST116") throw new GameActionError("Failed to load the dragon bag.");
 
   const dungeonRow: (string | null)[] = [null, null, null, null, null, null];
   for (const r of rowRes.data || []) {

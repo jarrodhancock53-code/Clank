@@ -35,6 +35,7 @@ export interface TurnFlags {
   archaeologistBonusAvailable: boolean; // may take an extra token on next room entry
   dragonScaleArmor: Record<string, boolean>; // playerId -> next dragon attack does 0 damage
   reactOpportunities: ReactOpportunity[]; // pending Assassin reacts
+  pendingDiscard: { playerId: string } | null; // Wand of Recalling: must pick 1 card from hand to discard before any other action
 }
 
 export interface ReactOpportunity {

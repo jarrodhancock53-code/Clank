@@ -29,6 +29,7 @@ function emptyTurnFlags() {
     archaeologistBonusAvailable: false,
     dragonScaleArmor: {} as Record<string, boolean>,
     reactOpportunities: [],
+    pendingDiscard: null,
   };
 }
 
@@ -180,6 +181,10 @@ function requireActivePlayer(ctx: EngineContext, playerId: string): PlayerRow {
   const player = ctx.players.find((p) => p.id === playerId);
   if (!player) throw new GameActionError("Player not found in this game.");
   if (player.is_knocked_out || player.has_escaped) throw new GameActionError("You are no longer active in the dungeon.");
+  const pendingDiscard = ctx.game.game_state.turnFlags.pendingDiscard;
+  if (pendingDiscard && pendingDiscard.playerId === playerId) {
+    throw new GameActionError("You must choose a card to discard from Wand of Recalling first.");
+  }
   return player;
 }
 
@@ -350,6 +355,28 @@ export function playCard(ctx: EngineContext, playerId: string, cardInstanceId: s
   log.push(`Played ${def.name}${resourceParts.length ? ` (${resourceParts.join(", ")})` : ""}.`);
 
   return log;
+}
+
+/**
+ * Resolves the Wand of Recalling's mandatory discard (set as a pending
+ * flag by the draw_2_discard_1 effect when no choice was supplied
+ * up front, since the drawn cards aren't known to the client until
+ * after the draw happens server-side).
+ */
+export function resolvePendingDiscard(ctx: EngineContext, playerId: string, discardCardId: string): string[] {
+  const gameState = ctx.game.game_state;
+  const pending = gameState.turnFlags.pendingDiscard;
+  if (!pending || pending.playerId !== playerId) throw new GameActionError("There is no pending discard to resolve.");
+  const player = ctx.players.find((p) => p.id === playerId);
+  if (!player) throw new GameActionError("Player not found.");
+  if (!player.hand.includes(discardCardId)) throw new GameActionError("That card is not in your hand.");
+
+  const idx = player.hand.indexOf(discardCardId);
+  player.hand.splice(idx, 1);
+  player.discard.push(discardCardId);
+  gameState.turnFlags.pendingDiscard = null;
+
+  return [`${player.display_name} discarded ${getCardDef(discardCardId).name} (Wand of Recalling).`];
 }
 
 // =========================================================
