@@ -3,6 +3,13 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { handleRouteError } from "@/lib/api/helpers";
 import { GameActionError } from "@/lib/game/types";
 
+// Without this, Next.js caches this GET route handler's response per
+// join code (no dynamic functions are used to opt out automatically),
+// so every refetch after the first would return a stale snapshot —
+// e.g. new players joining would never appear to anyone already in
+// the lobby.
+export const dynamic = "force-dynamic";
+
 export async function GET(_req: Request, { params }: { params: { code: string } }) {
   try {
     const supabase = getSupabaseServerClient();
